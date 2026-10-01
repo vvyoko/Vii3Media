@@ -1,0 +1,39 @@
+--- a/src/read.c
++++ b/src/read.c
+@@ -3220,21 +3220,26 @@
+         if (!memcmp(ipmaHeader.type, "ipma", 4)) {
+             uint32_t versionAndFlags;
+             AVIF_CHECKRES(avifParseItemPropertyAssociation(meta, avifROStreamCurrent(&s), ipmaHeader.size, diag, &versionAndFlags));
++            // NOTE(vii3): 放宽 libavif 1.4.2 对「同一 (version,flags) 出现多个 ipma」的拒绝。
++            // ImageMagick/libheif 等编码器会把属性分进多个 ipma 盒子（各自对应不同 item），
++            // 按 HEIF 规范这些盒子应当合并而非报错。这里改为放行（每个 ipma 已在
++            // avifParseItemPropertyAssociation 中解析并关联到各自的 item），仅在确实出现过多
++            // 不同 (version,flags) 元组时才报错。
++            avifBool ipmaDuplicate = AVIF_FALSE;
+             for (uint32_t i = 0; i < versionAndFlagsSeenCount; ++i) {
+                 if (versionAndFlagsSeen[i] == versionAndFlags) {
+-                    // BMFF (ISO/IEC 14496-12:2022) 8.11.14.1 - There shall be at most one
+-                    // ItemPropertyAssociationBox with a given pair of values of version and
+-                    // flags.
+-                    avifDiagnosticsPrintf(diag, "Multiple Box[ipma] with a given pair of values of version and flags. See BMFF (ISO/IEC 14496-12:2022) 8.11.14.1");
+-                    return AVIF_RESULT_BMFF_PARSE_FAILED;
++                    ipmaDuplicate = AVIF_TRUE;
++                    break;
+                 }
+             }
+-            if (versionAndFlagsSeenCount == MAX_IPMA_VERSION_AND_FLAGS_SEEN) {
+-                avifDiagnosticsPrintf(diag, "Exceeded possible count of unique ipma version and flags tuples");
+-                return AVIF_RESULT_BMFF_PARSE_FAILED;
++            if (!ipmaDuplicate) {
++                if (versionAndFlagsSeenCount == MAX_IPMA_VERSION_AND_FLAGS_SEEN) {
++                    avifDiagnosticsPrintf(diag, "Exceeded possible count of unique ipma version and flags tuples");
++                    return AVIF_RESULT_BMFF_PARSE_FAILED;
++                }
++                versionAndFlagsSeen[versionAndFlagsSeenCount] = versionAndFlags;
++                ++versionAndFlagsSeenCount;
+             }
+-            versionAndFlagsSeen[versionAndFlagsSeenCount] = versionAndFlags;
+-            ++versionAndFlagsSeenCount;
+         } else {
+             // These must all be type ipma
+             avifDiagnosticsPrintf(diag, "Box[iprp] contains a box that isn't type 'ipma'");
